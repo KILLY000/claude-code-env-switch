@@ -404,6 +404,101 @@ CONFIGURATION LOCATION:
 EOF
 }
 
+# Interactive configuration selector (arrow keys)
+_ccenv_select() {
+    _ensure_env_dir
+
+    local configs=($(_list_configs))
+
+    if [[ ${#configs[@]} -eq 0 ]]; then
+        echo "No configurations found."
+        echo "Run 'ccenv add' to create one, or 'ccenv help' for more commands."
+        return 0
+    fi
+
+    # Build display lines
+    local display_lines=()
+    for conf in "${configs[@]}"; do
+        local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
+        local token_type=$(_get_config_value "$conf_file" "TYPE")
+        local description=$(_get_config_value "$conf_file" "DESCRIPTION")
+        local desc_display=""
+        if [[ -n "$description" ]]; then
+            desc_display=" - $description"
+        fi
+        display_lines+=("$conf ($token_type)$desc_display")
+    done
+
+    local selected=1
+    local total=${#configs[@]}
+
+    # Restore terminal on exit
+    _ccenv_restore() {
+        tput cnorm 2>/dev/null
+        stty echo 2>/dev/null
+    }
+    trap '_ccenv_restore; return 130' INT
+
+    stty -echo
+    tput civis
+
+    # Render the menu
+    _ccenv_render() {
+        if [[ "$1" == "1" ]]; then
+            echo "Select a configuration to start Claude:"
+            echo "(↑/↓ move, Enter select, q cancel)"
+            echo
+        else
+            tput cuu $total
+        fi
+        local i
+        for i in $(seq 1 $total); do
+            if [[ $i -eq $selected ]]; then
+                printf "\e[2K  \e[7m %s \e[0m\n" "${display_lines[$i]}"
+            else
+                printf "\e[2K   %s\n" "${display_lines[$i]}"
+            fi
+        done
+    }
+
+    _ccenv_render 1
+
+    local key
+    while true; do
+        read -rsk1 key
+        case "$key" in
+            $'\x1b')
+                read -rsk2 key
+                case "$key" in
+                    "[A")
+                        ((selected > 1)) && ((selected--)) || selected=$total
+                        ;;
+                    "[B")
+                        ((selected < total)) && ((selected++)) || selected=1
+                        ;;
+                esac
+                ;;
+            $'\n')
+                break
+                ;;
+            "q"|"Q")
+                _ccenv_restore
+                trap - INT
+                echo
+                echo "Cancelled"
+                return 0
+                ;;
+        esac
+        _ccenv_render 0
+    done
+
+    _ccenv_restore
+    trap - INT
+    echo
+
+    _ccenv_use "${configs[$selected]}"
+}
+
 # ==============================================================================
 # Main Function
 # ==============================================================================
@@ -431,8 +526,11 @@ ccenv() {
         delete|del|rm)
             _ccenv_delete "$@"
             ;;
-        help|--help|-h|"")
+        help|--help|-h)
             _ccenv_help
+            ;;
+        "")
+            _ccenv_select
             ;;
         *)
             echo "error: Unknown command '$command'" >&2
