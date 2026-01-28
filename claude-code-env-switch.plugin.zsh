@@ -63,6 +63,16 @@ _get_config_value() {
     grep "^${key}=" "$conf_file" 2>/dev/null | cut -d'=' -f2-
 }
 
+# Normalize token type (backward compat: api -> auth-token)
+_normalize_token_type() {
+    local t="$1"
+    if [[ "$t" == "api" ]]; then
+        echo "auth-token"
+    else
+        echo "$t"
+    fi
+}
+
 # ==============================================================================
 # Subcommands
 # ==============================================================================
@@ -77,16 +87,20 @@ _ccenv_add() {
     # Select token type
     local token_type
     echo "Select token type:"
-    echo "  1) API (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)"
-    echo "  2) OAuth (CLAUDE_CODE_OAUTH_TOKEN, obtain via 'claude setup-token')"
+    echo "  1) Auth Token (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN)"
+    echo "  2) API Key (ANTHROPIC_BASE_URL + ANTHROPIC_API_KEY)"
+    echo "  3) OAuth (CLAUDE_CODE_OAUTH_TOKEN, obtain via 'claude setup-token')"
     echo
-    read "choice?Choose (1 or 2): "
+    read "choice?Choose (1, 2, or 3): "
 
     case "$choice" in
-        1|api)
-            token_type="api"
+        1|auth-token)
+            token_type="auth-token"
             ;;
-        2|oauth)
+        2|api-key)
+            token_type="api-key"
+            ;;
+        3|oauth)
             token_type="oauth"
             ;;
         *)
@@ -100,9 +114,10 @@ _ccenv_add() {
     # Get tokens based on type
     local base_url=""
     local auth_token=""
+    local api_key=""
     local oauth_token=""
 
-    if [[ "$token_type" == "api" ]]; then
+    if [[ "$token_type" == "auth-token" ]]; then
         read "base_url?Enter ANTHROPIC_BASE_URL: "
         if [[ -z "$base_url" ]]; then
             echo "error: ANTHROPIC_BASE_URL cannot be empty" >&2
@@ -117,6 +132,21 @@ _ccenv_add() {
             return 1
         fi
         echo "Token: $(_mask_token "$auth_token")"
+    elif [[ "$token_type" == "api-key" ]]; then
+        read "base_url?Enter ANTHROPIC_BASE_URL: "
+        if [[ -z "$base_url" ]]; then
+            echo "error: ANTHROPIC_BASE_URL cannot be empty" >&2
+            return 1
+        fi
+
+        echo -n "Enter ANTHROPIC_API_KEY: "
+        read -s api_key
+        echo
+        if [[ -z "$api_key" ]]; then
+            echo "error: ANTHROPIC_API_KEY cannot be empty" >&2
+            return 1
+        fi
+        echo "Token: $(_mask_token "$api_key")"
     else
         echo -n "Enter CLAUDE_CODE_OAUTH_TOKEN: "
         read -s oauth_token
@@ -155,9 +185,12 @@ _ccenv_add() {
     {
         echo "TYPE=$token_type"
         echo "DESCRIPTION=$description"
-        if [[ "$token_type" == "api" ]]; then
+        if [[ "$token_type" == "auth-token" ]]; then
             echo "ANTHROPIC_BASE_URL=$base_url"
             echo "ANTHROPIC_AUTH_TOKEN=$auth_token"
+        elif [[ "$token_type" == "api-key" ]]; then
+            echo "ANTHROPIC_BASE_URL=$base_url"
+            echo "ANTHROPIC_API_KEY=$api_key"
         else
             echo "CLAUDE_CODE_OAUTH_TOKEN=$oauth_token"
         fi
@@ -187,16 +220,20 @@ _ccenv_use() {
     fi
 
     local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
-    local token_type=$(_get_config_value "$conf_file" "TYPE")
+    local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
 
     echo "Using configuration: $config_name ($token_type)"
     echo "Starting Claude..."
     echo
 
     # Run claude with environment variables (only for this command)
-    if [[ "$token_type" == "api" ]]; then
+    if [[ "$token_type" == "auth-token" ]]; then
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_AUTH_TOKEN=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN") \
+        claude
+    elif [[ "$token_type" == "api-key" ]]; then
+        ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
+        ANTHROPIC_API_KEY=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY") \
         claude
     else
         CLAUDE_CODE_OAUTH_TOKEN=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN") \
@@ -220,7 +257,7 @@ _ccenv_list() {
     echo
     for conf in "${configs[@]}"; do
         local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
-        local token_type=$(_get_config_value "$conf_file" "TYPE")
+        local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
         local description=$(_get_config_value "$conf_file" "DESCRIPTION")
         local desc_display=""
         if [[ -n "$description" ]]; then
@@ -249,7 +286,7 @@ _ccenv_info() {
     fi
 
     local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
-    local token_type=$(_get_config_value "$conf_file" "TYPE")
+    local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
     local description=$(_get_config_value "$conf_file" "DESCRIPTION")
 
     echo "Configuration: $config_name"
@@ -259,11 +296,16 @@ _ccenv_info() {
     fi
     echo
 
-    if [[ "$token_type" == "api" ]]; then
+    if [[ "$token_type" == "auth-token" ]]; then
         local base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
         local auth_token=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")
         echo "ANTHROPIC_BASE_URL:    $base_url"
-        echo "ANTHROPIC_AUTH_TOKEN: $(_mask_token "$auth_token")"
+        echo "ANTHROPIC_AUTH_TOKEN:  $(_mask_token "$auth_token")"
+    elif [[ "$token_type" == "api-key" ]]; then
+        local base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
+        local api_key=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")
+        echo "ANTHROPIC_BASE_URL: $base_url"
+        echo "ANTHROPIC_API_KEY:  $(_mask_token "$api_key")"
     else
         local oauth_token=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")
         echo "CLAUDE_CODE_OAUTH_TOKEN: $(_mask_token "$oauth_token")"
@@ -286,30 +328,40 @@ _ccenv_edit() {
     fi
 
     local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
-    local token_type=$(_get_config_value "$conf_file" "TYPE")
+    local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
     local current_description=$(_get_config_value "$conf_file" "DESCRIPTION")
 
-    echo "Editing configuration: $config_name"
+    echo "Editing configuration: $config_name ($token_type)"
     echo "Press Enter to keep current value"
     echo
 
     local new_base_url=""
     local new_auth_token=""
+    local new_api_key=""
     local new_oauth_token=""
     local new_description=""
     local current_base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
     local current_auth_token=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")
+    local current_api_key=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")
     local current_oauth_token=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")
 
     read "new_description?Description [$current_description]: "
 
-    if [[ "$token_type" == "api" ]]; then
+    if [[ "$token_type" == "auth-token" ]]; then
         read "new_base_url?ANTHROPIC_BASE_URL [$current_base_url]: "
         echo -n "ANTHROPIC_AUTH_TOKEN [$(_mask_token "$current_auth_token")]: "
         read -s new_auth_token
         echo
         if [[ -n "$new_auth_token" ]]; then
             echo "New token: $(_mask_token "$new_auth_token")"
+        fi
+    elif [[ "$token_type" == "api-key" ]]; then
+        read "new_base_url?ANTHROPIC_BASE_URL [$current_base_url]: "
+        echo -n "ANTHROPIC_API_KEY [$(_mask_token "$current_api_key")]: "
+        read -s new_api_key
+        echo
+        if [[ -n "$new_api_key" ]]; then
+            echo "New token: $(_mask_token "$new_api_key")"
         fi
     else
         echo -n "CLAUDE_CODE_OAUTH_TOKEN [$(_mask_token "$current_oauth_token")]: "
@@ -324,9 +376,12 @@ _ccenv_edit() {
     {
         echo "TYPE=$token_type"
         echo "DESCRIPTION=${new_description:-$current_description}"
-        if [[ "$token_type" == "api" ]]; then
+        if [[ "$token_type" == "auth-token" ]]; then
             echo "ANTHROPIC_BASE_URL=${new_base_url:-$current_base_url}"
             echo "ANTHROPIC_AUTH_TOKEN=${new_auth_token:-$current_auth_token}"
+        elif [[ "$token_type" == "api-key" ]]; then
+            echo "ANTHROPIC_BASE_URL=${new_base_url:-$current_base_url}"
+            echo "ANTHROPIC_API_KEY=${new_api_key:-$current_api_key}"
         else
             echo "CLAUDE_CODE_OAUTH_TOKEN=${new_oauth_token:-$current_oauth_token}"
         fi
@@ -351,7 +406,7 @@ _ccenv_delete() {
     fi
 
     local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
-    local token_type=$(_get_config_value "$conf_file" "TYPE")
+    local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
     local description=$(_get_config_value "$conf_file" "DESCRIPTION")
 
     echo "Configuration: $config_name"
@@ -420,7 +475,7 @@ _ccenv_select() {
     local display_lines=()
     for conf in "${configs[@]}"; do
         local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
-        local token_type=$(_get_config_value "$conf_file" "TYPE")
+        local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
         local description=$(_get_config_value "$conf_file" "DESCRIPTION")
         local desc_display=""
         if [[ -n "$description" ]]; then
