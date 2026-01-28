@@ -298,14 +298,17 @@ _ccenv_use() {
 
     # Run claude with environment variables (only for this command)
     if [[ "$token_type" == "auth-token" ]]; then
+        CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_AUTH_TOKEN=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN") \
         claude
     elif [[ "$token_type" == "api-key" ]]; then
+        CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_API_KEY=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY") \
         claude
     else
+        CLAUDE_ENV_CONFIG="$config_name" \
         CLAUDE_CODE_OAUTH_TOKEN=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN") \
         claude
     fi

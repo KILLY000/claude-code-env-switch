@@ -174,6 +174,38 @@ The plugin provides zsh tab completion for all subcommands and configuration nam
 - Tokens are masked when displayed (showing first 6 and last 4 characters)
 - Deletion requires explicit confirmation
 
+## Status Line
+
+The plugin includes a `statusline.sh` script that displays the current model and active configuration name in the Claude Code status line.
+
+When you launch Claude via `ccenv use <name>`, the environment variable `CLAUDE_ENV_CONFIG` is automatically set. The statusline script reads this variable and renders output like:
+
+```
+[Claude 3.5 Sonnet] ⚙ work
+```
+
+If `CLAUDE_ENV_CONFIG` is not set (e.g. Claude was started directly without `ccenv`), it falls back to showing only the model name:
+
+```
+[Claude 3.5 Sonnet]
+```
+
+### Setup
+
+Add the following to your `.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.oh-my-zsh/custom/plugins/claude-code-env-switch/statusline.sh",
+    "padding": 0
+  }
+}
+```
+
+> **Note:** The script requires `jq` to parse the JSON input from Claude Code. Make sure `jq` is installed (`brew install jq` on macOS).
+
 ## Example Workflow
 
 ```bash
