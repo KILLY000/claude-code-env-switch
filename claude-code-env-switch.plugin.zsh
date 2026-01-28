@@ -3,6 +3,7 @@
 
 # Configuration directory
 export CLAUDE_ENVS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-envs"
+export CLAUDE_ENVS_ORDER_FILE="$CLAUDE_ENVS_DIR/.order"
 
 # ==============================================================================
 # Helper Functions
@@ -16,11 +17,79 @@ _ensure_env_dir() {
     fi
 }
 
-# List all available configs
-_list_configs() {
+# Ensure order file exists; seed with existing configs if missing
+_ensure_order_file() {
     _ensure_env_dir
-    local configs=($(find "$CLAUDE_ENVS_DIR" -maxdepth 1 -name "*.conf" -exec basename {} .conf \; 2>/dev/null))
-    echo "${configs[@]}"
+    if [[ ! -f "$CLAUDE_ENVS_ORDER_FILE" ]]; then
+        local configs=($(find "$CLAUDE_ENVS_DIR" -maxdepth 1 -name "*.conf" -exec basename {} .conf \; 2>/dev/null | sort))
+        printf "%s\n" "${configs[@]}" > "$CLAUDE_ENVS_ORDER_FILE" 2>/dev/null
+    fi
+}
+
+# Rewrite .order to contain exactly the given names, one per line
+_write_order_file() {
+    local names=("$@")
+    printf "%s\n" "${names[@]}" > "$CLAUDE_ENVS_ORDER_FILE"
+}
+
+# Remove a single entry from .order
+_remove_from_order() {
+    local name="$1"
+    [[ ! -f "$CLAUDE_ENVS_ORDER_FILE" ]] && return
+    local tmp=()
+    local line
+    while IFS= read -r line; do
+        [[ "$line" == "$name" ]] && continue
+        [[ -z "$line" ]] && continue
+        tmp+=("$line")
+    done < "$CLAUDE_ENVS_ORDER_FILE"
+    _write_order_file "${tmp[@]}"
+}
+
+# Append a name to .order (idempotent -- skips if already present)
+_append_to_order() {
+    local name="$1"
+    _ensure_order_file
+    if grep -qxF "$name" "$CLAUDE_ENVS_ORDER_FILE" 2>/dev/null; then
+        return
+    fi
+    echo "$name" >> "$CLAUDE_ENVS_ORDER_FILE"
+}
+
+# List all available configs, respecting .order file
+_list_configs() {
+    _ensure_order_file
+
+    # Collect all actual .conf files on disk
+    local -A on_disk=()
+    local f
+    for f in "$CLAUDE_ENVS_DIR"/*.conf(N); do
+        local name="${f:t:r}"
+        on_disk[$name]=1
+    done
+
+    local result=()
+
+    # Walk the .order file; emit only entries that still exist on disk
+    if [[ -s "$CLAUDE_ENVS_ORDER_FILE" ]]; then
+        local line
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if (( ${+on_disk[$line]} )); then
+                result+=("$line")
+                unset "on_disk[$line]"
+            fi
+        done < "$CLAUDE_ENVS_ORDER_FILE"
+    fi
+
+    # Append any configs found on disk but missing from .order
+    local orphan
+    for orphan in "${(ko)on_disk[@]}"; do
+        result+=("$orphan")
+        echo "$orphan" >> "$CLAUDE_ENVS_ORDER_FILE"
+    done
+
+    echo "${result[@]}"
 }
 
 # Check if config exists
@@ -197,6 +266,7 @@ _ccenv_add() {
     } > "$conf_file"
 
     chmod 600 "$conf_file"
+    _append_to_order "$config_name"
 
     echo
     echo "Configuration '$config_name' saved successfully!"
@@ -423,6 +493,7 @@ _ccenv_delete() {
     fi
 
     rm -f "$conf_file"
+    _remove_from_order "$config_name"
     echo "Configuration '$config_name' deleted successfully!"
 }
 
@@ -443,6 +514,7 @@ COMMANDS:
     info <name>      Display configuration details
     edit <name>      Edit existing configuration
     delete <name>    Delete a configuration (aliases: del, rm)
+    reorder          Reorder configurations interactively (alias: order)
     help             Show this help message
 
 EXAMPLES:
@@ -452,6 +524,7 @@ EXAMPLES:
     ccenv info work              # Show details of 'work' config
     ccenv edit work              # Edit the 'work' configuration
     ccenv delete work            # Delete the 'work' configuration
+    ccenv reorder                # Reorder configurations with arrow keys
 
 CONFIGURATION LOCATION:
     ~/.config/claude-envs/
@@ -554,6 +627,137 @@ _ccenv_select() {
     _ccenv_use "${configs[$selected]}"
 }
 
+# Interactive reorder: arrow-key UI to rearrange config order
+_ccenv_reorder() {
+    _ensure_order_file
+
+    local configs=($(_list_configs))
+
+    if [[ ${#configs[@]} -le 1 ]]; then
+        echo "Need at least 2 configurations to reorder."
+        return 0
+    fi
+
+    # Build display lines
+    local -a display_lines
+    local conf
+    for conf in "${configs[@]}"; do
+        local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
+        local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
+        local description=$(_get_config_value "$conf_file" "DESCRIPTION")
+        local desc_display=""
+        if [[ -n "$description" ]]; then
+            desc_display=" - $description"
+        fi
+        display_lines+=("$conf ($token_type)$desc_display")
+    done
+
+    local selected=1
+    local total=${#configs[@]}
+    local changed=0
+
+    # Restore terminal on exit
+    _ccenv_restore() {
+        tput cnorm 2>/dev/null
+        stty echo 2>/dev/null
+    }
+    trap '_ccenv_restore; return 130' INT
+
+    stty -echo
+    tput civis
+
+    # Render the menu
+    _ccenv_reorder_render() {
+        if [[ "$1" == "1" ]]; then
+            echo "Reorder configurations:"
+            echo "(↑/↓ move cursor, u/d move item up/down, Enter save, q cancel)"
+            echo
+        else
+            tput cuu $total
+        fi
+        local i
+        for i in $(seq 1 $total); do
+            if [[ $i -eq $selected ]]; then
+                printf "\e[2K  \e[7m %d. %s \e[0m\n" "$i" "${display_lines[$i]}"
+            else
+                printf "\e[2K   %d. %s\n" "$i" "${display_lines[$i]}"
+            fi
+        done
+    }
+
+    _ccenv_reorder_render 1
+
+    local key
+    while true; do
+        read -rsk1 key
+        case "$key" in
+            $'\x1b')
+                read -rsk2 key
+                case "$key" in
+                    "[A")   # Up arrow -- move cursor
+                        ((selected > 1)) && ((selected--)) || selected=$total
+                        ;;
+                    "[B")   # Down arrow -- move cursor
+                        ((selected < total)) && ((selected++)) || selected=1
+                        ;;
+                esac
+                ;;
+            "u"|"U"|"k"|"K")   # Move item UP
+                if ((selected > 1)); then
+                    local prev=$((selected - 1))
+                    # Swap in configs array
+                    local tmp="${configs[$selected]}"
+                    configs[$selected]="${configs[$prev]}"
+                    configs[$prev]="$tmp"
+                    # Swap in display_lines array
+                    tmp="${display_lines[$selected]}"
+                    display_lines[$selected]="${display_lines[$prev]}"
+                    display_lines[$prev]="$tmp"
+                    ((selected--))
+                    changed=1
+                fi
+                ;;
+            "d"|"D"|"j"|"J")   # Move item DOWN
+                if ((selected < total)); then
+                    local next=$((selected + 1))
+                    # Swap in configs array
+                    local tmp="${configs[$selected]}"
+                    configs[$selected]="${configs[$next]}"
+                    configs[$next]="$tmp"
+                    # Swap in display_lines array
+                    tmp="${display_lines[$selected]}"
+                    display_lines[$selected]="${display_lines[$next]}"
+                    display_lines[$next]="$tmp"
+                    ((selected++))
+                    changed=1
+                fi
+                ;;
+            $'\n')   # Enter -- save and exit
+                break
+                ;;
+            "q"|"Q")   # Cancel
+                _ccenv_restore
+                trap - INT
+                echo
+                echo "Cancelled, order unchanged."
+                return 0
+                ;;
+        esac
+        _ccenv_reorder_render 0
+    done
+
+    _ccenv_restore
+    trap - INT
+    echo
+
+    if ((changed)); then
+        _write_order_file "${configs[@]}"
+        echo "Order saved successfully!"
+    else
+        echo "No changes made."
+    fi
+}
+
 # ==============================================================================
 # Main Function
 # ==============================================================================
@@ -581,6 +785,9 @@ ccenv() {
         delete|del|rm)
             _ccenv_delete "$@"
             ;;
+        reorder|order)
+            _ccenv_reorder
+            ;;
         help|--help|-h)
             _ccenv_help
             ;;
@@ -594,3 +801,35 @@ ccenv() {
             ;;
     esac
 }
+
+# Tab completion for ccenv
+_ccenv_completion() {
+    local -a subcommands
+    subcommands=(
+        'add:Add a new configuration'
+        'use:Switch to specified configuration and start claude'
+        'list:List all configurations'
+        'ls:List all configurations'
+        'info:Display configuration details'
+        'edit:Edit existing configuration'
+        'delete:Delete a configuration'
+        'del:Delete a configuration'
+        'rm:Delete a configuration'
+        'reorder:Reorder configurations interactively'
+        'order:Reorder configurations interactively'
+        'help:Show help message'
+    )
+
+    if (( CURRENT == 2 )); then
+        _describe 'command' subcommands
+    elif (( CURRENT == 3 )); then
+        case "${words[2]}" in
+            use|info|edit|delete|del|rm)
+                local configs=($(_list_configs))
+                _describe 'config' configs
+                ;;
+        esac
+    fi
+}
+
+compdef _ccenv_completion ccenv
