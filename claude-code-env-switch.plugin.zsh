@@ -596,12 +596,15 @@ _ccenv_select() {
         # Render function
         _ccenv_render() {
             if [[ "$1" == "1" ]]; then
+                echo "Claude Code Environment Switch"
+                echo "Manage multiple authentication configurations"
+                echo
                 echo "Configurations:"
                 echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  q:quit)"
                 echo
             else
-                # 使用绝对定位移动到第 4 行（配置列表起始位置）
-                tput cup 3 0
+                # 使用绝对定位移动到第 7 行（配置列表起始位置）
+                tput cup 6 0
             fi
             for i in $(seq 1 $total); do
                 if [[ $i -eq $selected ]]; then
@@ -665,6 +668,7 @@ _ccenv_select() {
         # Execute action
         case "$action" in
             "use")
+                clear
                 _ccenv_use "${configs[$selected]}"
                 return $?
                 ;;
