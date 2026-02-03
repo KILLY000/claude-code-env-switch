@@ -339,17 +339,17 @@ _ccenv_list() {
         echo "  - $conf ($token_type)$desc_display"
     done
     echo
-    echo "Use 'ccenv info <name>' for details"
+    echo "Use 'ccenv view <name>' for details"
     echo "Use 'ccenv use <name>' to switch"
 }
 
 # Show configuration details
-_ccenv_info() {
+_ccenv_view() {
     local config_name="$1"
 
     if [[ -z "$config_name" ]]; then
         echo "error: Please specify a configuration name" >&2
-        echo "Usage: ccenv info <name>" >&2
+        echo "Usage: ccenv view <name>" >&2
         return 1
     fi
 
@@ -514,7 +514,7 @@ COMMANDS:
     add              Add a new configuration
     use <name>       Switch to specified configuration and start claude
     list             List all configurations (alias: ls)
-    info <name>      Display configuration details
+    view <name>      Display configuration details (alias: info)
     edit <name>      Edit existing configuration
     delete <name>    Delete a configuration (aliases: del, rm)
     reorder          Reorder configurations interactively (alias: order)
@@ -524,7 +524,7 @@ EXAMPLES:
     ccenv add                    # Create a new configuration
     ccenv use work               # Use the 'work' configuration
     ccenv list                   # List all configurations
-    ccenv info work              # Show details of 'work' config
+    ccenv view work              # Show details of 'work' config
     ccenv edit work              # Edit the 'work' configuration
     ccenv delete work            # Delete the 'work' configuration
     ccenv reorder                # Reorder configurations with arrow keys
@@ -682,7 +682,7 @@ _ccenv_select() {
                 ;;
             "view")
                 clear
-                _ccenv_info "${configs[$selected]}"
+                _ccenv_view "${configs[$selected]}"
                 echo
                 echo "(Press any key to return)"
                 read -rsk1
@@ -850,8 +850,8 @@ ccenv() {
         list|ls)
             _ccenv_list
             ;;
-        info)
-            _ccenv_info "$@"
+        view|info)
+            _ccenv_view "$@"
             ;;
         edit)
             _ccenv_edit "$@"
@@ -884,6 +884,7 @@ _ccenv_completion() {
         'use:Switch to specified configuration and start claude'
         'list:List all configurations'
         'ls:List all configurations'
+        'view:Display configuration details'
         'info:Display configuration details'
         'edit:Edit existing configuration'
         'delete:Delete a configuration'
@@ -898,7 +899,7 @@ _ccenv_completion() {
         _describe 'command' subcommands
     elif (( CURRENT == 3 )); then
         case "${words[2]}" in
-            use|info|edit|delete|del|rm)
+            use|view|info|edit|delete|del|rm)
                 local configs=($(_list_configs))
                 _describe 'config' configs
                 ;;
