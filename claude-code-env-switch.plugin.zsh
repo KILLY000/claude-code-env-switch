@@ -539,95 +539,163 @@ EOF
 _ccenv_select() {
     _ensure_env_dir
 
-    local configs=($(_list_configs))
-
-    if [[ ${#configs[@]} -eq 0 ]]; then
-        echo "No configurations found."
-        echo "Run 'ccenv add' to create one, or 'ccenv help' for more commands."
-        return 0
-    fi
-
-    # Build display lines
-    local display_lines=()
-    for conf in "${configs[@]}"; do
-        local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
-        local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
-        local description=$(_get_config_value "$conf_file" "DESCRIPTION")
-        local desc_display=""
-        if [[ -n "$description" ]]; then
-            desc_display=" - $description"
-        fi
-        display_lines+=("$conf ($token_type)$desc_display")
-    done
-
     local selected=1
-    local total=${#configs[@]}
 
-    # Restore terminal on exit
-    _ccenv_restore() {
-        tput cnorm 2>/dev/null
-        stty echo 2>/dev/null
-    }
-    trap '_ccenv_restore; return 130' INT
-
-    stty -echo
-    tput civis
-
-    # Render the menu
-    _ccenv_render() {
-        if [[ "$1" == "1" ]]; then
-            echo "Select a configuration to start Claude:"
-            echo "(↑/↓ move, Enter select, q cancel)"
-            echo
-        else
-            tput cuu $total
-        fi
-        local i
-        for i in $(seq 1 $total); do
-            if [[ $i -eq $selected ]]; then
-                printf "\e[2K  \e[7m %s \e[0m\n" "${display_lines[$i]}"
-            else
-                printf "\e[2K   %s\n" "${display_lines[$i]}"
-            fi
-        done
-    }
-
-    _ccenv_render 1
-
-    local key
     while true; do
-        read -rsk1 key
-        case "$key" in
-            $'\x1b')
-                read -rsk2 key
+        clear  # Clean interface after each action
+
+        # Reload configs each iteration (handles add/edit/delete)
+        local configs=($(_list_configs))
+
+        # Handle empty state - minimal UI
+        if [[ ${#configs[@]} -eq 0 ]]; then
+            echo "No configurations found."
+            echo "(a: add, q: quit)"
+            echo
+            local key
+            while true; do
+                read -rsk1 key
                 case "$key" in
-                    "[A")
-                        ((selected > 1)) && ((selected--)) || selected=$total
+                    "a"|"A")
+                        _ccenv_add
+                        break  # Re-enter outer loop to show new config
                         ;;
-                    "[B")
-                        ((selected < total)) && ((selected++)) || selected=1
+                    "q"|"Q")
+                        return 0
                         ;;
                 esac
-                ;;
-            $'\n')
-                break
-                ;;
-            "q"|"Q")
-                _ccenv_restore
-                trap - INT
+            done
+            continue
+        fi
+
+        # Build display lines
+        local display_lines=()
+        for conf in "${configs[@]}"; do
+            local conf_file="$CLAUDE_ENVS_DIR/$conf.conf"
+            local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
+            local description=$(_get_config_value "$conf_file" "DESCRIPTION")
+            local desc_display=""
+            [[ -n "$description" ]] && desc_display=" - $description"
+            display_lines+=("$conf ($token_type)$desc_display")
+        done
+
+        # Clamp selected index if config was deleted
+        local total=${#configs[@]}
+        ((selected > total)) && selected=$total
+        ((selected < 1)) && selected=1
+
+        # Terminal setup
+        _ccenv_restore() {
+            tput cnorm 2>/dev/null
+            stty echo 2>/dev/null
+        }
+        trap '_ccenv_restore; return 130' INT
+        stty -echo
+        tput civis
+
+        # Render function
+        _ccenv_render() {
+            if [[ "$1" == "1" ]]; then
+                echo "Configurations:"
+                echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  q:quit)"
                 echo
-                echo "Cancelled"
+            else
+                tput cuu $total
+            fi
+            for i in $(seq 1 $total); do
+                if [[ $i -eq $selected ]]; then
+                    printf "\e[2K  \e[7m %s \e[0m\n" "${display_lines[$i]}"
+                else
+                    printf "\e[2K   %s\n" "${display_lines[$i]}"
+                fi
+            done
+        }
+
+        _ccenv_render 1
+
+        local action=""
+        local key
+        while true; do
+            read -rsk1 key
+            case "$key" in
+                $'\x1b')
+                    read -rsk2 key
+                    case "$key" in
+                        "[A") ((selected > 1)) && ((selected--)) || selected=$total ;;
+                        "[B") ((selected < total)) && ((selected++)) || selected=1 ;;
+                    esac
+                    ;;
+                $'\n')
+                    action="use"
+                    break
+                    ;;
+                "a"|"A")
+                    action="add"
+                    break
+                    ;;
+                "e"|"E")
+                    action="edit"
+                    break
+                    ;;
+                "d"|"D")
+                    action="delete"
+                    break
+                    ;;
+                "v"|"V")
+                    action="view"
+                    break
+                    ;;
+                "o"|"O")
+                    action="reorder"
+                    break
+                    ;;
+                "q"|"Q")
+                    action="quit"
+                    break
+                    ;;
+            esac
+            _ccenv_render 0
+        done
+
+        # Restore terminal before running action
+        _ccenv_restore
+        trap - INT
+        echo
+
+        # Execute action
+        case "$action" in
+            "use")
+                _ccenv_use "${configs[$selected]}"
+                return $?
+                ;;
+            "add")
+                _ccenv_add
+                # Continue loop to refresh list
+                ;;
+            "edit")
+                _ccenv_edit "${configs[$selected]}"
+                # Continue loop to refresh list
+                ;;
+            "delete")
+                _ccenv_delete "${configs[$selected]}"
+                # Continue loop to refresh list
+                ;;
+            "view")
+                _ccenv_info "${configs[$selected]}"
+                echo
+                echo "(Press any key to return)"
+                read -rsk1
+                # Continue loop
+                ;;
+            "reorder")
+                _ccenv_reorder
+                # Continue loop to refresh list
+                ;;
+            "quit")
                 return 0
                 ;;
         esac
-        _ccenv_render 0
     done
-
-    _ccenv_restore
-    trap - INT
-    echo
-
-    _ccenv_use "${configs[$selected]}"
 }
 
 # Interactive reorder: arrow-key UI to rearrange config order
