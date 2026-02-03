@@ -600,7 +600,8 @@ _ccenv_select() {
                 echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  q:quit)"
                 echo
             else
-                tput cuu $total
+                # 使用绝对定位移动到第 4 行（配置列表起始位置）
+                tput cup 3 0
             fi
             for i in $(seq 1 $total); do
                 if [[ $i -eq $selected ]]; then
@@ -614,7 +615,7 @@ _ccenv_select() {
         _ccenv_render 1
 
         local action=""
-        local key
+        local key=""
         while true; do
             read -rsk1 key
             case "$key" in
@@ -660,7 +661,6 @@ _ccenv_select() {
         # Restore terminal before running action
         _ccenv_restore
         trap - INT
-        echo
 
         # Execute action
         case "$action" in
@@ -669,27 +669,29 @@ _ccenv_select() {
                 return $?
                 ;;
             "add")
+                clear
                 _ccenv_add
-                # Continue loop to refresh list
                 ;;
             "edit")
+                clear
                 _ccenv_edit "${configs[$selected]}"
-                # Continue loop to refresh list
                 ;;
             "delete")
+                clear
                 _ccenv_delete "${configs[$selected]}"
-                # Continue loop to refresh list
                 ;;
             "view")
+                clear
                 _ccenv_info "${configs[$selected]}"
                 echo
                 echo "(Press any key to return)"
                 read -rsk1
-                # Continue loop
+                # 清空输入缓冲区（处理方向键等多字符序列）
+                read -rsk -t 0.01 2>/dev/null || true
                 ;;
             "reorder")
+                clear
                 _ccenv_reorder
-                # Continue loop to refresh list
                 ;;
             "quit")
                 return 0
@@ -744,7 +746,8 @@ _ccenv_reorder() {
             echo "(↑/↓ move cursor, u/d move item up/down, Enter save, q cancel)"
             echo
         else
-            tput cuu $total
+            # 使用绝对定位移动到第 4 行（配置列表起始位置）
+            tput cup 3 0
         fi
         local i
         for i in $(seq 1 $total); do
@@ -758,7 +761,7 @@ _ccenv_reorder() {
 
     _ccenv_reorder_render 1
 
-    local key
+    local key=""
     while true; do
         read -rsk1 key
         case "$key" in
