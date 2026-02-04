@@ -32,7 +32,15 @@ Run `ccenv` without arguments to launch an interactive arrow-key selector:
 ccenv
 ```
 
-Use **↑/↓** to navigate, **Enter** to select and start Claude, **q** to cancel.
+Controls:
+- **↑/↓** — Navigate (wraps around)
+- **Enter** — Start Claude with selected configuration
+- **a** — Add new configuration
+- **e** — Edit selected configuration
+- **d** — Delete selected configuration
+- **v** — View selected configuration details
+- **o** — Reorder configurations
+- **q** — Quit
 
 ### Add a Configuration
 
@@ -76,12 +84,14 @@ Alias: `ccenv ls`
 Display configuration details (tokens are masked for security):
 
 ```bash
-ccenv info <name>
+ccenv view <name>
 ```
+
+Alias: `ccenv info`
 
 Example:
 ```bash
-ccenv info work
+ccenv view work
 # Configuration: work
 # Type: auth-token
 # Description: Work account
@@ -135,6 +145,8 @@ Display help information:
 ccenv help
 ```
 
+Aliases: `ccenv --help`, `ccenv -h`
+
 ## Configuration Types
 
 The plugin supports three authentication methods:
@@ -176,18 +188,18 @@ The plugin provides zsh tab completion for all subcommands and configuration nam
 
 ## Status Line
 
-The plugin includes a `statusline.sh` script that displays the current model and active configuration name in the Claude Code status line.
+The plugin includes a `statusline.sh` script that displays the current model, context usage, working directory, and active configuration name in the Claude Code status line.
 
 When you launch Claude via `ccenv use <name>`, the environment variable `CLAUDE_ENV_CONFIG` is automatically set. The statusline script reads this variable and renders output like:
 
 ```
-[Claude 3.5 Sonnet] ⚙ work
+[Claude 3.5 Sonnet] | Context: 45% | Dir: my-project | Env: work
 ```
 
-If `CLAUDE_ENV_CONFIG` is not set (e.g. Claude was started directly without `ccenv`), it falls back to showing only the model name:
+If `CLAUDE_ENV_CONFIG` is not set (e.g. Claude was started directly without `ccenv`), the Env segment is omitted:
 
 ```
-[Claude 3.5 Sonnet]
+[Claude 3.5 Sonnet] | Context: 45% | Dir: my-project
 ```
 
 ### Setup
