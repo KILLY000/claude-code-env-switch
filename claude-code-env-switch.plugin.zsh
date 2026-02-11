@@ -273,12 +273,14 @@ _ccenv_add() {
 }
 
 # Use a configuration (set env vars and start claude)
+# Usage: _ccenv_use <config_name> [extra args for claude...]
 _ccenv_use() {
     local config_name="$1"
+    shift
 
     if [[ -z "$config_name" ]]; then
         echo "error: Please specify a configuration name" >&2
-        echo "Usage: ccenv use <name>" >&2
+        echo "Usage: ccenv use <name> [-- <args>]" >&2
         echo "Run 'ccenv list' to see available configurations" >&2
         return 1
     fi
@@ -293,6 +295,9 @@ _ccenv_use() {
     local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
 
     echo "Using configuration: $config_name ($token_type)"
+    if [[ $# -gt 0 ]]; then
+        echo "Extra args: $*"
+    fi
     echo "Starting Claude..."
     echo
 
@@ -301,16 +306,16 @@ _ccenv_use() {
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_AUTH_TOKEN=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN") \
-        claude
+        claude "$@"
     elif [[ "$token_type" == "api-key" ]]; then
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_API_KEY=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY") \
-        claude
+        claude "$@"
     else
         CLAUDE_ENV_CONFIG="$config_name" \
         CLAUDE_CODE_OAUTH_TOKEN=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN") \
-        claude
+        claude "$@"
     fi
 }
 
@@ -509,10 +514,12 @@ Manage multiple Claude Code authentication configurations.
 
 USAGE:
     ccenv <command> [args]
+    ccenv [-- <claude args>]
 
 COMMANDS:
     add              Add a new configuration
     use <name>       Switch to specified configuration and start claude
+                     Use -- to pass extra args: ccenv use <name> -- <args>
     list             List all configurations (alias: ls)
     view <name>      Display configuration details (alias: info)
     edit <name>      Edit existing configuration
@@ -520,14 +527,21 @@ COMMANDS:
     reorder          Reorder configurations interactively (alias: order)
     help             Show this help message
 
+INTERACTIVE MODE:
+    ccenv                        # Start interactive selector
+    ccenv -- <args>              # Start interactive selector with preset claude args
+    In interactive mode, press 's' to set/modify claude startup args.
+
 EXAMPLES:
     ccenv add                    # Create a new configuration
     ccenv use work               # Use the 'work' configuration
+    ccenv use work -- --verbose  # Use 'work' config, pass --verbose to claude
     ccenv list                   # List all configurations
     ccenv view work              # Show details of 'work' config
     ccenv edit work              # Edit the 'work' configuration
     ccenv delete work            # Delete the 'work' configuration
     ccenv reorder                # Reorder configurations with arrow keys
+    ccenv -- --model opus        # Interactive mode with preset args
 
 CONFIGURATION LOCATION:
     ~/.config/claude-envs/
@@ -536,10 +550,12 @@ EOF
 }
 
 # Interactive configuration selector (arrow keys)
+# Usage: _ccenv_select [extra args for claude...]
 _ccenv_select() {
     _ensure_env_dir
 
     local selected=1
+    local claude_args=("$@")
 
     while true; do
         clear  # Clean interface after each action
@@ -584,6 +600,19 @@ _ccenv_select() {
         ((selected > total)) && selected=$total
         ((selected < 1)) && selected=1
 
+        # Calculate list start row (dynamic based on whether args are shown)
+        # Row 0: "Claude Code Environment Switch"
+        # Row 1: "Manage multiple authentication configurations"
+        # Row 2: (blank)
+        # Row 3: "Configurations:"
+        # Row 4: "(shortcuts...)"
+        # Row 5: "Args: ..." (only if claude_args is non-empty)
+        # Row 5/6: (blank)
+        # Row 6/7: first config item
+        local has_args=0
+        [[ ${#claude_args[@]} -gt 0 ]] && has_args=1
+        local list_start_row=$((6 + has_args))
+
         # Terminal setup
         _ccenv_restore() {
             tput cnorm 2>/dev/null
@@ -600,11 +629,13 @@ _ccenv_select() {
                 echo "Manage multiple authentication configurations"
                 echo
                 echo "Configurations:"
-                echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  q:quit)"
+                echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  s:args  q:quit)"
+                if [[ $has_args -eq 1 ]]; then
+                    echo "Args: ${claude_args[*]}"
+                fi
                 echo
             else
-                # 使用绝对定位移动到第 7 行（配置列表起始位置）
-                tput cup 6 0
+                tput cup $list_start_row 0
             fi
             for i in $(seq 1 $total); do
                 if [[ $i -eq $selected ]]; then
@@ -653,6 +684,10 @@ _ccenv_select() {
                     action="reorder"
                     break
                     ;;
+                "s"|"S")
+                    action="args"
+                    break
+                    ;;
                 "q"|"Q")
                     action="quit"
                     break
@@ -669,7 +704,7 @@ _ccenv_select() {
         case "$action" in
             "use")
                 clear
-                _ccenv_use "${configs[$selected]}"
+                _ccenv_use "${configs[$selected]}" "${claude_args[@]}"
                 return $?
                 ;;
             "add")
@@ -696,6 +731,19 @@ _ccenv_select() {
             "reorder")
                 clear
                 _ccenv_reorder
+                ;;
+            "args")
+                clear
+                echo "Current args: ${claude_args[*]:-(none)}"
+                echo
+                echo "Enter new args for claude (space-separated, empty to clear):"
+                local new_args_str
+                read "new_args_str?"
+                if [[ -z "$new_args_str" ]]; then
+                    claude_args=()
+                else
+                    claude_args=(${=new_args_str})
+                fi
                 ;;
             "quit")
                 return 0
@@ -849,7 +897,19 @@ ccenv() {
             _ccenv_add
             ;;
         use)
-            _ccenv_use "$@"
+            # Parse: ccenv use <name> [-- <extra args>]
+            local config_name="$1"
+            shift 2>/dev/null || true
+            local extra_args=()
+            local found_sep=0
+            for arg in "$@"; do
+                if [[ "$found_sep" -eq 1 ]]; then
+                    extra_args+=("$arg")
+                elif [[ "$arg" == "--" ]]; then
+                    found_sep=1
+                fi
+            done
+            _ccenv_use "$config_name" "${extra_args[@]}"
             ;;
         list|ls)
             _ccenv_list
@@ -868,6 +928,10 @@ ccenv() {
             ;;
         help|--help|-h)
             _ccenv_help
+            ;;
+        --)
+            # ccenv -- <extra args> → interactive mode with preset args
+            _ccenv_select "$@"
             ;;
         "")
             _ccenv_select
