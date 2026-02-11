@@ -600,18 +600,23 @@ _ccenv_select() {
         ((selected > total)) && selected=$total
         ((selected < 1)) && selected=1
 
-        # Calculate list start row (dynamic based on whether args are shown)
+        # Calculate list start row (dynamic based on terminal width and args)
         # Row 0: "Claude Code Environment Switch"
         # Row 1: "Manage multiple authentication configurations"
         # Row 2: (blank)
         # Row 3: "Configurations:"
-        # Row 4: "(shortcuts...)"
-        # Row 5: "Args: ..." (only if claude_args is non-empty)
-        # Row 5/6: (blank)
-        # Row 6/7: first config item
+        # Row 4+: "(shortcuts...)" - may wrap to multiple lines if terminal is narrow
+        # Next: "Args: ..." (only if claude_args is non-empty)
+        # Next: (blank)
+        # Next: first config item
         local has_args=0
         [[ ${#claude_args[@]} -gt 0 ]] && has_args=1
-        local list_start_row=$((6 + has_args))
+
+        local shortcuts_line="(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  s:args  q:quit)"
+        local term_width=$(tput cols)
+        local shortcuts_len=${#shortcuts_line}
+        local shortcuts_rows=$(( (shortcuts_len + term_width - 1) / term_width ))
+        local list_start_row=$((5 + shortcuts_rows + has_args))
 
         # Terminal setup
         _ccenv_restore() {
@@ -629,7 +634,7 @@ _ccenv_select() {
                 echo "Manage multiple authentication configurations"
                 echo
                 echo "Configurations:"
-                echo "(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  s:args  q:quit)"
+                echo "$shortcuts_line"
                 if [[ $has_args -eq 1 ]]; then
                     echo "Args: ${claude_args[*]}"
                 fi
