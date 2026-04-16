@@ -40,6 +40,7 @@ Controls:
 - **d** — Delete selected configuration
 - **v** — View selected configuration details
 - **o** — Reorder configurations
+- **w** — Write the selected configuration into `~/.claude/settings.json`
 - **q** — Quit
 
 ### Add a Configuration

@@ -964,6 +964,7 @@ INTERACTIVE MODE:
     ccenv                        # Start interactive selector
     ccenv -- <args>              # Start interactive selector with preset claude args
     In interactive mode, press 's' to set/modify claude startup args.
+    Press 'w' to write the selected config into ~/.claude/settings.json.
 
 EXAMPLES:
     ccenv add                    # Create a new configuration
@@ -1048,7 +1049,7 @@ _ccenv_select() {
         local has_args=0
         [[ ${#claude_args[@]} -gt 0 ]] && has_args=1
 
-        local shortcuts_line="(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  s:args  q:quit)"
+        local shortcuts_line="(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  w:settings  s:args  q:quit)"
         local term_width=$(tput cols)
         local shortcuts_len=${#shortcuts_line}
         local shortcuts_rows=$(( (shortcuts_len + term_width - 1) / term_width ))
@@ -1125,6 +1126,10 @@ _ccenv_select() {
                     action="reorder"
                     break
                     ;;
+                "w"|"W")
+                    action="settings"
+                    break
+                    ;;
                 "s"|"S")
                     action="args"
                     break
@@ -1172,6 +1177,14 @@ _ccenv_select() {
             "reorder")
                 clear
                 _ccenv_reorder
+                ;;
+            "settings")
+                clear
+                _ccenv_settings_set "${configs[$selected]}"
+                echo
+                echo "(Press any key to return)"
+                read -rsk1
+                read -rsk -t 0.01 2>/dev/null || true
                 ;;
             "args")
                 clear
