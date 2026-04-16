@@ -1,18 +1,20 @@
-#!/bin/bash
-# Read JSON input from stdin
+#!/bin/sh
 input=$(cat)
+model=$(echo "$input" | jq -r '.model.display_name // "Unknown Model"')
+used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
+cwd=$(basename "$(echo "$input" | jq -r '.cwd // .workspace.current_dir // ""')")
+env_name="${CLAUDE_ENV_CONFIG:-}"
 
-# Extract values using jq
-MODEL_DISPLAY=$(echo "$input" | jq -r '.model.display_name')
-PERCENT_USED=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
-CURRENT_DIR=$(echo "$input" | jq -r '.workspace.current_dir')
-CURRENT_DIR=$(basename "$CURRENT_DIR")
-
-# CLAUDE_ENV_CONFIG is set by ccenv when launching claude
-CONFIG_NAME="${CLAUDE_ENV_CONFIG:-}"
-
-if [[ -n "$CONFIG_NAME" ]]; then
-    echo "[$MODEL_DISPLAY] | Context: ${PERCENT_USED}% | Dir: $CURRENT_DIR | Env: $CONFIG_NAME"
+if [ -n "$used" ]; then
+  ctx=$(printf "%.0f%%" "$used")
 else
-    echo "[$MODEL_DISPLAY] | Context: ${PERCENT_USED}% | Dir: $CURRENT_DIR"
+  ctx="--"
 fi
+
+printf "\033[36m%s\033[0m  \033[33mCtx: %s\033[0m  \033[32m%s\033[0m" "$model" "$ctx" "$cwd"
+
+if [ -n "$env_name" ]; then
+  printf "  \033[35mEnv: %s\033[0m" "$env_name"
+fi
+
+printf "\n"

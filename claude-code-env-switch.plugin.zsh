@@ -7,6 +7,7 @@ export CLAUDE_ENVS_ORDER_FILE="$CLAUDE_ENVS_DIR/.order"
 export CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
 
 typeset -ga CLAUDE_MANAGED_ENV_KEYS=(
+    CLAUDE_ENV_CONFIG
     CLAUDE_CODE_OAUTH_TOKEN
     ANTHROPIC_BASE_URL
     ANTHROPIC_AUTH_TOKEN
@@ -194,7 +195,8 @@ _list_settings_managed_keys() {
         .env // {}
         | keys[]?
         | select(
-            . == "CLAUDE_CODE_OAUTH_TOKEN"
+            . == "CLAUDE_ENV_CONFIG"
+            or . == "CLAUDE_CODE_OAUTH_TOKEN"
             or . == "ANTHROPIC_BASE_URL"
             or . == "ANTHROPIC_AUTH_TOKEN"
             or . == "ANTHROPIC_API_KEY"
@@ -228,7 +230,7 @@ _mask_env_value() {
 
     if [[ -z "$value" ]]; then
         echo "(not set)"
-    elif [[ "$key" == "ANTHROPIC_BASE_URL" || "$key" == "CLAUDE_CODE_ATTRIBUTION_HEADER" || "$key" == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]]; then
+    elif [[ "$key" == "CLAUDE_ENV_CONFIG" || "$key" == "ANTHROPIC_BASE_URL" || "$key" == "CLAUDE_CODE_ATTRIBUTION_HEADER" || "$key" == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]]; then
         echo "$value"
     else
         _mask_token "$value"
@@ -249,6 +251,7 @@ _clear_settings_managed_env() {
 
     if ! jq '
         del(
+            .env.CLAUDE_ENV_CONFIG,
             .env.CLAUDE_CODE_OAUTH_TOKEN,
             .env.ANTHROPIC_BASE_URL,
             .env.ANTHROPIC_AUTH_TOKEN,
@@ -297,12 +300,14 @@ _set_settings_from_config() {
         local auth_token=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")
         if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
             jq \
+                --arg config_name "$config_name" \
                 --arg base_url "$base_url" \
                 --arg auth_token "$auth_token" \
                 --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '
                 del(
+                    .env.CLAUDE_ENV_CONFIG,
                     .env.CLAUDE_CODE_OAUTH_TOKEN,
                     .env.ANTHROPIC_BASE_URL,
                     .env.ANTHROPIC_AUTH_TOKEN,
@@ -311,6 +316,7 @@ _set_settings_from_config() {
                     .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
                 )
                 | .env = ((.env // {}) + {
+                    "CLAUDE_ENV_CONFIG": $config_name,
                     "ANTHROPIC_BASE_URL": $base_url,
                     "ANTHROPIC_AUTH_TOKEN": $auth_token,
                     "CLAUDE_CODE_ATTRIBUTION_HEADER": $attribution_header,
@@ -323,12 +329,14 @@ _set_settings_from_config() {
             }
         else
             jq -n \
+                --arg config_name "$config_name" \
                 --arg base_url "$base_url" \
                 --arg auth_token "$auth_token" \
                 --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '{
                     env: {
+                        CLAUDE_ENV_CONFIG: $config_name,
                         ANTHROPIC_BASE_URL: $base_url,
                         ANTHROPIC_AUTH_TOKEN: $auth_token,
                         CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
@@ -345,12 +353,14 @@ _set_settings_from_config() {
         local api_key=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")
         if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
             jq \
+                --arg config_name "$config_name" \
                 --arg base_url "$base_url" \
                 --arg api_key "$api_key" \
                 --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '
                 del(
+                    .env.CLAUDE_ENV_CONFIG,
                     .env.CLAUDE_CODE_OAUTH_TOKEN,
                     .env.ANTHROPIC_BASE_URL,
                     .env.ANTHROPIC_AUTH_TOKEN,
@@ -359,6 +369,7 @@ _set_settings_from_config() {
                     .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
                 )
                 | .env = ((.env // {}) + {
+                    "CLAUDE_ENV_CONFIG": $config_name,
                     "ANTHROPIC_BASE_URL": $base_url,
                     "ANTHROPIC_API_KEY": $api_key,
                     "CLAUDE_CODE_ATTRIBUTION_HEADER": $attribution_header,
@@ -371,12 +382,14 @@ _set_settings_from_config() {
             }
         else
             jq -n \
+                --arg config_name "$config_name" \
                 --arg base_url "$base_url" \
                 --arg api_key "$api_key" \
                 --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '{
                     env: {
+                        CLAUDE_ENV_CONFIG: $config_name,
                         ANTHROPIC_BASE_URL: $base_url,
                         ANTHROPIC_API_KEY: $api_key,
                         CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
@@ -392,9 +405,11 @@ _set_settings_from_config() {
         local oauth_token=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")
         if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
             jq \
+                --arg config_name "$config_name" \
                 --arg oauth_token "$oauth_token" \
                 '
                 del(
+                    .env.CLAUDE_ENV_CONFIG,
                     .env.CLAUDE_CODE_OAUTH_TOKEN,
                     .env.ANTHROPIC_BASE_URL,
                     .env.ANTHROPIC_AUTH_TOKEN,
@@ -403,6 +418,7 @@ _set_settings_from_config() {
                     .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
                 )
                 | .env = ((.env // {}) + {
+                    "CLAUDE_ENV_CONFIG": $config_name,
                     "CLAUDE_CODE_OAUTH_TOKEN": $oauth_token
                 })
                 ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file" || {
@@ -412,9 +428,11 @@ _set_settings_from_config() {
             }
         else
             jq -n \
+                --arg config_name "$config_name" \
                 --arg oauth_token "$oauth_token" \
                 '{
                     env: {
+                        CLAUDE_ENV_CONFIG: $config_name,
                         CLAUDE_CODE_OAUTH_TOKEN: $oauth_token
                     }
                 }' > "$tmp_file" || {

@@ -71,7 +71,7 @@ ccenv use work
 ```
 
 > If `~/.claude/settings.json` already contains any of these managed auth env vars, `ccenv use` will refuse to start Claude until you clear them:
-> `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_ATTRIBUTION_HEADER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+> `CLAUDE_ENV_CONFIG`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_ATTRIBUTION_HEADER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
 >
 > Clear them with:
 >
@@ -167,7 +167,7 @@ ccenv settings clear
 ccenv settings set work
 ```
 
-`ccenv settings set <name>` will clear any existing managed auth env first, then write the selected config into `~/.claude/settings.json`.
+`ccenv settings set <name>` will clear any existing managed auth env first, then write the selected config into `~/.claude/settings.json`, including `CLAUDE_ENV_CONFIG=<name>` so the status line can show the active env even when Claude is started from settings.
 
 ## Configuration Types
 
@@ -225,13 +225,13 @@ The plugin includes a `statusline.sh` script that displays the current model, co
 When you launch Claude via `ccenv use <name>`, the environment variable `CLAUDE_ENV_CONFIG` is automatically set. The statusline script reads this variable and renders output like:
 
 ```
-[Claude 3.5 Sonnet] | Context: 45% | Dir: my-project | Env: work
+Claude 3.5 Sonnet  Ctx: 45%  my-project  Env: work
 ```
 
 If `CLAUDE_ENV_CONFIG` is not set (e.g. Claude was started directly without `ccenv`), the Env segment is omitted:
 
 ```
-[Claude 3.5 Sonnet] | Context: 45% | Dir: my-project
+Claude 3.5 Sonnet  Ctx: 45%  my-project
 ```
 
 ### Setup
