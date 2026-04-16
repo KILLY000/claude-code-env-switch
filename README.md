@@ -69,6 +69,15 @@ Example:
 ccenv use work
 ```
 
+> If `~/.claude/settings.json` already contains any of these managed auth env vars, `ccenv use` will refuse to start Claude until you clear them:
+> `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_ATTRIBUTION_HEADER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+>
+> Clear them with:
+>
+> ```bash
+> ccenv settings clear
+> ```
+
 ### List All Configurations
 
 Show all saved configurations in their custom order:
@@ -147,6 +156,18 @@ ccenv help
 
 Aliases: `ccenv --help`, `ccenv -h`
 
+### Manage `~/.claude/settings.json`
+
+Inspect, clear, or apply managed auth env in Claude's `settings.json`:
+
+```bash
+ccenv settings view
+ccenv settings clear
+ccenv settings set work
+```
+
+`ccenv settings set <name>` will clear any existing managed auth env first, then write the selected config into `~/.claude/settings.json`.
+
 ## Configuration Types
 
 The plugin supports three authentication methods:
@@ -157,16 +178,26 @@ Uses two environment variables:
 - `ANTHROPIC_BASE_URL` — Your Anthropic base URL
 - `ANTHROPIC_AUTH_TOKEN` — Your authentication token
 
+And automatically sets:
+- `CLAUDE_CODE_ATTRIBUTION_HEADER=0`
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+
 ### api-key
 
 Uses two environment variables:
 - `ANTHROPIC_BASE_URL` — Your Anthropic base URL
 - `ANTHROPIC_API_KEY` — Your API key
 
+And automatically sets:
+- `CLAUDE_CODE_ATTRIBUTION_HEADER=0`
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+
 ### oauth
 
 Uses one environment variable:
 - `CLAUDE_CODE_OAUTH_TOKEN` — Your OAuth token (obtain via `claude setup-token`)
+
+OAuth mode does not set the two Claude Code traffic-control env vars above.
 
 ## Configuration Storage
 
@@ -241,6 +272,12 @@ ccenv list
 # Available configurations:
 #   - work (auth-token) - Work account
 #   - personal (oauth) - Personal account
+
+# Write one config into ~/.claude/settings.json env
+ccenv settings set personal
+
+# Clear managed auth env from ~/.claude/settings.json before using ccenv directly
+ccenv settings clear
 
 # Reorder configurations
 ccenv reorder

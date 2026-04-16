@@ -4,6 +4,19 @@
 # Configuration directory
 export CLAUDE_ENVS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-envs"
 export CLAUDE_ENVS_ORDER_FILE="$CLAUDE_ENVS_DIR/.order"
+export CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
+
+typeset -ga CLAUDE_MANAGED_ENV_KEYS=(
+    CLAUDE_CODE_OAUTH_TOKEN
+    ANTHROPIC_BASE_URL
+    ANTHROPIC_AUTH_TOKEN
+    ANTHROPIC_API_KEY
+    CLAUDE_CODE_ATTRIBUTION_HEADER
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+)
+
+export CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT="0"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT="1"
 
 # ==============================================================================
 # Helper Functions
@@ -142,6 +155,280 @@ _normalize_token_type() {
     fi
 }
 
+# Require jq for settings.json operations
+_require_jq() {
+    if ! command -v jq >/dev/null 2>&1; then
+        echo "error: jq is required for settings commands" >&2
+        return 1
+    fi
+}
+
+# Ensure ~/.claude exists before writing settings.json
+_ensure_claude_settings_dir() {
+    local settings_dir="${CLAUDE_SETTINGS_FILE:h}"
+    if [[ ! -d "$settings_dir" ]]; then
+        mkdir -p "$settings_dir"
+        chmod 700 "$settings_dir" 2>/dev/null || true
+    fi
+}
+
+# Validate settings.json shape before reading or writing
+_validate_settings_file() {
+    [[ ! -f "$CLAUDE_SETTINGS_FILE" ]] && return 0
+
+    _require_jq || return 1
+
+    if ! jq -e '.env == null or (.env | type == "object")' "$CLAUDE_SETTINGS_FILE" >/dev/null 2>&1; then
+        echo "error: $CLAUDE_SETTINGS_FILE is not valid JSON or .env is not an object" >&2
+        return 1
+    fi
+}
+
+# List managed auth keys currently present in ~/.claude/settings.json
+_list_settings_managed_keys() {
+    [[ ! -f "$CLAUDE_SETTINGS_FILE" ]] && return 0
+
+    _validate_settings_file || return 1
+
+    jq -r '
+        .env // {}
+        | keys[]?
+        | select(
+            . == "CLAUDE_CODE_OAUTH_TOKEN"
+            or . == "ANTHROPIC_BASE_URL"
+            or . == "ANTHROPIC_AUTH_TOKEN"
+            or . == "ANTHROPIC_API_KEY"
+            or . == "CLAUDE_CODE_ATTRIBUTION_HEADER"
+            or . == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+        )
+    ' "$CLAUDE_SETTINGS_FILE"
+}
+
+# Check whether ~/.claude/settings.json already contains managed auth env
+_settings_has_managed_env() {
+    local keys=""
+    keys="$(_list_settings_managed_keys)" || return 1
+    [[ -n "$keys" ]]
+}
+
+# Get env value from ~/.claude/settings.json
+_get_settings_env_value() {
+    local key="$1"
+    [[ ! -f "$CLAUDE_SETTINGS_FILE" ]] && return 0
+
+    _validate_settings_file || return 1
+
+    jq -r --arg key "$key" '.env[$key] // empty' "$CLAUDE_SETTINGS_FILE"
+}
+
+# Mask settings values, except base URL which is not secret
+_mask_env_value() {
+    local key="$1"
+    local value="$2"
+
+    if [[ -z "$value" ]]; then
+        echo "(not set)"
+    elif [[ "$key" == "ANTHROPIC_BASE_URL" || "$key" == "CLAUDE_CODE_ATTRIBUTION_HEADER" || "$key" == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]]; then
+        echo "$value"
+    else
+        _mask_token "$value"
+    fi
+}
+
+# Clear managed auth env from ~/.claude/settings.json while preserving other fields
+_clear_settings_managed_env() {
+    _require_jq || return 1
+    _validate_settings_file || return 1
+
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        return 0
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/ccenv-settings.XXXXXX") || return 1
+
+    if ! jq '
+        del(
+            .env.CLAUDE_CODE_OAUTH_TOKEN,
+            .env.ANTHROPIC_BASE_URL,
+            .env.ANTHROPIC_AUTH_TOKEN,
+            .env.ANTHROPIC_API_KEY,
+            .env.CLAUDE_CODE_ATTRIBUTION_HEADER,
+            .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+        )
+        | if ((.env // {}) | keys | length) == 0 then del(.env) else . end
+    ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file"; then
+        rm -f "$tmp_file"
+        echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+        return 1
+    fi
+
+    mv "$tmp_file" "$CLAUDE_SETTINGS_FILE"
+    chmod 600 "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
+}
+
+# Write one configuration into ~/.claude/settings.json env after clearing managed keys
+_set_settings_from_config() {
+    local config_name="$1"
+
+    if [[ -z "$config_name" ]]; then
+        echo "error: Please specify a configuration name" >&2
+        echo "Usage: ccenv settings set <name>" >&2
+        return 1
+    fi
+
+    if ! _config_exists "$config_name"; then
+        echo "error: Configuration '$config_name' not found" >&2
+        echo "Run 'ccenv list' to see available configurations" >&2
+        return 1
+    fi
+
+    _require_jq || return 1
+    _validate_settings_file || return 1
+    _ensure_claude_settings_dir
+
+    local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
+    local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
+    local tmp_file
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/ccenv-settings.XXXXXX") || return 1
+
+    if [[ "$token_type" == "auth-token" ]]; then
+        local base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
+        local auth_token=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")
+        if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
+            jq \
+                --arg base_url "$base_url" \
+                --arg auth_token "$auth_token" \
+                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
+                '
+                del(
+                    .env.CLAUDE_CODE_OAUTH_TOKEN,
+                    .env.ANTHROPIC_BASE_URL,
+                    .env.ANTHROPIC_AUTH_TOKEN,
+                    .env.ANTHROPIC_API_KEY,
+                    .env.CLAUDE_CODE_ATTRIBUTION_HEADER,
+                    .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                )
+                | .env = ((.env // {}) + {
+                    "ANTHROPIC_BASE_URL": $base_url,
+                    "ANTHROPIC_AUTH_TOKEN": $auth_token,
+                    "CLAUDE_CODE_ATTRIBUTION_HEADER": $attribution_header,
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": $disable_nonessential_traffic
+                })
+                ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        else
+            jq -n \
+                --arg base_url "$base_url" \
+                --arg auth_token "$auth_token" \
+                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
+                '{
+                    env: {
+                        ANTHROPIC_BASE_URL: $base_url,
+                        ANTHROPIC_AUTH_TOKEN: $auth_token,
+                        CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
+                        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $disable_nonessential_traffic
+                    }
+                }' > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to create $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        fi
+    elif [[ "$token_type" == "api-key" ]]; then
+        local base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
+        local api_key=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")
+        if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
+            jq \
+                --arg base_url "$base_url" \
+                --arg api_key "$api_key" \
+                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
+                '
+                del(
+                    .env.CLAUDE_CODE_OAUTH_TOKEN,
+                    .env.ANTHROPIC_BASE_URL,
+                    .env.ANTHROPIC_AUTH_TOKEN,
+                    .env.ANTHROPIC_API_KEY,
+                    .env.CLAUDE_CODE_ATTRIBUTION_HEADER,
+                    .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                )
+                | .env = ((.env // {}) + {
+                    "ANTHROPIC_BASE_URL": $base_url,
+                    "ANTHROPIC_API_KEY": $api_key,
+                    "CLAUDE_CODE_ATTRIBUTION_HEADER": $attribution_header,
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": $disable_nonessential_traffic
+                })
+                ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        else
+            jq -n \
+                --arg base_url "$base_url" \
+                --arg api_key "$api_key" \
+                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
+                '{
+                    env: {
+                        ANTHROPIC_BASE_URL: $base_url,
+                        ANTHROPIC_API_KEY: $api_key,
+                        CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
+                        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $disable_nonessential_traffic
+                    }
+                }' > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to create $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        fi
+    else
+        local oauth_token=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")
+        if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
+            jq \
+                --arg oauth_token "$oauth_token" \
+                '
+                del(
+                    .env.CLAUDE_CODE_OAUTH_TOKEN,
+                    .env.ANTHROPIC_BASE_URL,
+                    .env.ANTHROPIC_AUTH_TOKEN,
+                    .env.ANTHROPIC_API_KEY,
+                    .env.CLAUDE_CODE_ATTRIBUTION_HEADER,
+                    .env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+                )
+                | .env = ((.env // {}) + {
+                    "CLAUDE_CODE_OAUTH_TOKEN": $oauth_token
+                })
+                ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        else
+            jq -n \
+                --arg oauth_token "$oauth_token" \
+                '{
+                    env: {
+                        CLAUDE_CODE_OAUTH_TOKEN: $oauth_token
+                    }
+                }' > "$tmp_file" || {
+                rm -f "$tmp_file"
+                echo "error: Failed to create $CLAUDE_SETTINGS_FILE" >&2
+                return 1
+            }
+        fi
+    fi
+
+    mv "$tmp_file" "$CLAUDE_SETTINGS_FILE"
+    chmod 600 "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
+}
+
 # ==============================================================================
 # Subcommands
 # ==============================================================================
@@ -272,6 +559,130 @@ _ccenv_add() {
     echo "Configuration '$config_name' saved successfully!"
 }
 
+# Manage ~/.claude/settings.json env
+_ccenv_settings_help() {
+    cat <<'EOF'
+Manage Claude auth env in ~/.claude/settings.json
+
+USAGE:
+    ccenv settings
+    ccenv settings view
+    ccenv settings clear
+    ccenv settings set <name>
+    ccenv settings apply <name>
+
+COMMANDS:
+    view           Show managed auth env currently stored in settings.json
+    clear          Remove managed auth env from settings.json
+    set <name>     Clear then write config <name> into settings.json env
+    apply <name>   Alias for set
+    help           Show this help message
+EOF
+}
+
+_ccenv_settings_view() {
+    echo "Settings file: $CLAUDE_SETTINGS_FILE"
+
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        echo "Status: not found"
+        return 0
+    fi
+
+    _validate_settings_file || return 1
+
+    local keys=""
+    keys="$(_list_settings_managed_keys)" || return 1
+
+    if [[ -z "$keys" ]]; then
+        echo "Status: no managed auth env found"
+        return 0
+    fi
+
+    echo "Status: managed auth env present"
+    echo
+
+    local key=""
+    for key in "${CLAUDE_MANAGED_ENV_KEYS[@]}"; do
+        local value=""
+        value=$(_get_settings_env_value "$key") || return 1
+        [[ -z "$value" ]] && continue
+        echo "$key: $(_mask_env_value "$key" "$value")"
+    done
+}
+
+_ccenv_settings_clear() {
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        echo "No settings file found at $CLAUDE_SETTINGS_FILE"
+        return 0
+    fi
+
+    local keys=""
+    keys="$(_list_settings_managed_keys)" || return 1
+
+    if [[ -z "$keys" ]]; then
+        echo "No managed auth env found in $CLAUDE_SETTINGS_FILE"
+        return 0
+    fi
+
+    _clear_settings_managed_env || return 1
+    echo "Cleared managed auth env from $CLAUDE_SETTINGS_FILE"
+}
+
+_ccenv_settings_set() {
+    local config_name="$1"
+    local existing_keys=""
+
+    if [[ -z "$config_name" ]]; then
+        echo "error: Please specify a configuration name" >&2
+        echo "Usage: ccenv settings set <name>" >&2
+        return 1
+    fi
+
+    if ! _config_exists "$config_name"; then
+        echo "error: Configuration '$config_name' not found" >&2
+        echo "Run 'ccenv list' to see available configurations" >&2
+        return 1
+    fi
+
+    existing_keys="$(_list_settings_managed_keys)" || return 1
+
+    if [[ -n "$existing_keys" ]]; then
+        echo "Found existing managed auth env in $CLAUDE_SETTINGS_FILE"
+        echo "Clearing existing managed auth env before applying '$config_name'..."
+        _clear_settings_managed_env || return 1
+    fi
+
+    _set_settings_from_config "$config_name" || return 1
+
+    echo "Applied configuration '$config_name' to $CLAUDE_SETTINGS_FILE"
+    echo "Run 'ccenv settings view' to verify"
+}
+
+_ccenv_settings() {
+    local subcommand="$1"
+    shift 2>/dev/null || true
+
+    case "$subcommand" in
+        ""|view|show|status)
+            _ccenv_settings_view
+            ;;
+        clear)
+            _ccenv_settings_clear
+            ;;
+        set|apply)
+            _ccenv_settings_set "$@"
+            ;;
+        help|--help|-h)
+            _ccenv_settings_help
+            ;;
+        *)
+            echo "error: Unknown settings subcommand '$subcommand'" >&2
+            echo "Run 'ccenv settings help' for usage information" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Use a configuration (set env vars and start claude)
 # Usage: _ccenv_use <config_name> [extra args for claude...]
 _ccenv_use() {
@@ -293,6 +704,19 @@ _ccenv_use() {
 
     local conf_file="$CLAUDE_ENVS_DIR/$config_name.conf"
     local token_type=$(_normalize_token_type "$(_get_config_value "$conf_file" "TYPE")")
+    local settings_keys=""
+
+    settings_keys="$(_list_settings_managed_keys)" || return 1
+    if [[ -n "$settings_keys" ]]; then
+        echo "error: Managed Claude auth env already exists in $CLAUDE_SETTINGS_FILE" >&2
+        echo "Clear it first with: ccenv settings clear" >&2
+        echo "Found keys:" >&2
+        local key=""
+        while IFS= read -r key; do
+            [[ -n "$key" ]] && echo "  - $key" >&2
+        done <<< "$settings_keys"
+        return 1
+    fi
 
     echo "Using configuration: $config_name ($token_type)"
     if [[ $# -gt 0 ]]; then
@@ -306,11 +730,15 @@ _ccenv_use() {
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_AUTH_TOKEN=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN") \
+        CLAUDE_CODE_ATTRIBUTION_HEADER="$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
         claude "$@"
     elif [[ "$token_type" == "api-key" ]]; then
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL") \
         ANTHROPIC_API_KEY=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY") \
+        CLAUDE_CODE_ATTRIBUTION_HEADER="$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
         claude "$@"
     else
         CLAUDE_ENV_CONFIG="$config_name" \
@@ -379,11 +807,15 @@ _ccenv_view() {
         local auth_token=$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")
         echo "ANTHROPIC_BASE_URL:    $base_url"
         echo "ANTHROPIC_AUTH_TOKEN:  $(_mask_token "$auth_token")"
+        echo "CLAUDE_CODE_ATTRIBUTION_HEADER: $CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT"
+        echo "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT"
     elif [[ "$token_type" == "api-key" ]]; then
         local base_url=$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")
         local api_key=$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")
         echo "ANTHROPIC_BASE_URL: $base_url"
         echo "ANTHROPIC_API_KEY:  $(_mask_token "$api_key")"
+        echo "CLAUDE_CODE_ATTRIBUTION_HEADER: $CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT"
+        echo "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT"
     else
         local oauth_token=$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")
         echo "CLAUDE_CODE_OAUTH_TOKEN: $(_mask_token "$oauth_token")"
@@ -521,6 +953,7 @@ COMMANDS:
     use <name>       Switch to specified configuration and start claude
                      Use -- to pass extra args: ccenv use <name> -- <args>
     list             List all configurations (alias: ls)
+    settings         Manage auth env in ~/.claude/settings.json
     view <name>      Display configuration details (alias: info)
     edit <name>      Edit existing configuration
     delete <name>    Delete a configuration (aliases: del, rm)
@@ -534,6 +967,9 @@ INTERACTIVE MODE:
 
 EXAMPLES:
     ccenv add                    # Create a new configuration
+    ccenv settings view          # Show managed auth env in settings.json
+    ccenv settings clear         # Clear managed auth env in settings.json
+    ccenv settings set work      # Write config 'work' into settings.json env
     ccenv use work               # Use the 'work' configuration
     ccenv use work -- --verbose  # Use 'work' config, pass --verbose to claude
     ccenv list                   # List all configurations
@@ -919,6 +1355,9 @@ ccenv() {
         list|ls)
             _ccenv_list
             ;;
+        settings)
+            _ccenv_settings "$@"
+            ;;
         view|info)
             _ccenv_view "$@"
             ;;
@@ -957,6 +1396,7 @@ _ccenv_completion() {
         'use:Switch to specified configuration and start claude'
         'list:List all configurations'
         'ls:List all configurations'
+        'settings:Manage auth env in ~/.claude/settings.json'
         'view:Display configuration details'
         'info:Display configuration details'
         'edit:Edit existing configuration'
@@ -972,7 +1412,27 @@ _ccenv_completion() {
         _describe 'command' subcommands
     elif (( CURRENT == 3 )); then
         case "${words[2]}" in
+            settings)
+                local -a settings_subcommands
+                settings_subcommands=(
+                    'view:Show managed auth env in settings.json'
+                    'show:Show managed auth env in settings.json'
+                    'status:Show managed auth env in settings.json'
+                    'clear:Clear managed auth env from settings.json'
+                    'set:Write one config into settings.json env'
+                    'apply:Write one config into settings.json env'
+                    'help:Show settings help'
+                )
+                _describe 'settings-command' settings_subcommands
+                ;;
             use|view|info|edit|delete|del|rm)
+                local configs=($(_list_configs))
+                _describe 'config' configs
+                ;;
+        esac
+    elif (( CURRENT == 4 )); then
+        case "${words[2]}:${words[3]}" in
+            settings:set|settings:apply)
                 local configs=($(_list_configs))
                 _describe 'config' configs
                 ;;
