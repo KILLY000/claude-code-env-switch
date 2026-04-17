@@ -240,11 +240,19 @@ When you launch Claude via `ccenv use <name>`, the environment variable `CLAUDE_
 Claude 3.5 Sonnet  Ctx: 45%  my-project  Env: work
 ```
 
+You can also set `CLAUDE_STATUSLINE_EXTRA` to append custom extension info:
+
+```
+Claude 3.5 Sonnet  Ctx: 45%  my-project  Env: work  staging
+```
+
 If `CLAUDE_ENV_CONFIG` is not set (e.g. Claude was started directly without `ccenv`), the Env segment is omitted:
 
 ```
 Claude 3.5 Sonnet  Ctx: 45%  my-project
 ```
+
+`CLAUDE_STATUSLINE_EXTRA` is optional and not managed by `ccenv settings set/clear`, so you can populate it from your own shell wrapper or by adding it manually under `.claude/settings.json` `env`.
 
 ### Setup
 
