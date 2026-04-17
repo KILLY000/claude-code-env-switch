@@ -218,6 +218,20 @@ Configurations are stored in `~/.config/claude-envs/` (respects `XDG_CONFIG_HOME
 
 Each configuration is a `.conf` file with simple key=value pairs. A `.order` file in the same directory maintains the custom display order of configurations.
 
+## Project Structure
+
+The plugin keeps the user-facing `ccenv` interface the same, but the implementation is split into small `zsh` modules for easier maintenance:
+
+- `claude-code-env-switch.plugin.zsh` — plugin entrypoint and module loader
+- `lib/core.zsh` — shared helpers and common paths/constants
+- `lib/config-store.zsh` — config file and `.order` management
+- `lib/settings.zsh` — `~/.claude/settings.json` helpers
+- `lib/statusline.zsh` — status line installation and cleanup
+- `lib/commands.zsh` — CLI subcommands
+- `lib/ui.zsh` — interactive selector and reorder UI
+- `lib/completion.zsh` — shell completion
+- `statusline.sh` — standalone Claude Code status line command script
+
 ## Tab Completion
 
 The plugin provides zsh tab completion for all subcommands and configuration names. Type `ccenv` and press Tab to see available commands, or `ccenv use` and press Tab to see available configurations.
