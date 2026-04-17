@@ -1421,11 +1421,14 @@ _ccenv_select() {
                 ;;
             "settings")
                 clear
+                local settings_status=0
                 _ccenv_settings_set "${configs[$selected]}"
+                settings_status=$?
                 echo
-                echo "(Press any key to return)"
+                echo "(Press any key to exit)"
                 read -rsk1
                 read -rsk -t 0.01 2>/dev/null || true
+                return $settings_status
                 ;;
             "args")
                 clear
