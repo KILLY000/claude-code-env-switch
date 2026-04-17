@@ -2,9 +2,11 @@
 # Manage multiple Claude Code authentication configurations
 
 # Configuration directory
+export CLAUDE_ENV_SWITCH_PLUGIN_DIR="${${(%):-%N}:A:h}"
 export CLAUDE_ENVS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claude-envs"
 export CLAUDE_ENVS_ORDER_FILE="$CLAUDE_ENVS_DIR/.order"
 export CLAUDE_SETTINGS_FILE="$HOME/.claude/settings.json"
+export CLAUDE_STATUSLINE_FILE="$HOME/.claude/statusline-command.sh"
 
 typeset -ga CLAUDE_MANAGED_ENV_KEYS=(
     CLAUDE_ENV_CONFIG
@@ -159,7 +161,7 @@ _normalize_token_type() {
 # Require jq for settings.json operations
 _require_jq() {
     if ! command -v jq >/dev/null 2>&1; then
-        echo "error: jq is required for settings commands" >&2
+        echo "error: jq is required for settings and statusline commands" >&2
         return 1
     fi
 }
@@ -179,10 +181,103 @@ _validate_settings_file() {
 
     _require_jq || return 1
 
-    if ! jq -e '.env == null or (.env | type == "object")' "$CLAUDE_SETTINGS_FILE" >/dev/null 2>&1; then
-        echo "error: $CLAUDE_SETTINGS_FILE is not valid JSON or .env is not an object" >&2
+    if ! jq -e '
+        (.env == null or (.env | type == "object"))
+        and (.statusLine == null or (.statusLine | type == "object"))
+    ' "$CLAUDE_SETTINGS_FILE" >/dev/null 2>&1; then
+        echo "error: $CLAUDE_SETTINGS_FILE is not valid JSON or .env/.statusLine are not objects" >&2
         return 1
     fi
+}
+
+_get_statusline_settings_value() {
+    local key="$1"
+    [[ ! -f "$CLAUDE_SETTINGS_FILE" ]] && return 0
+
+    _validate_settings_file || return 1
+
+    jq -r --arg key "$key" '.statusLine[$key] // empty' "$CLAUDE_SETTINGS_FILE"
+}
+
+_set_statusline_in_settings() {
+    _require_jq || return 1
+    _validate_settings_file || return 1
+    _ensure_claude_settings_dir
+
+    local tmp_file
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/ccenv-statusline.XXXXXX") || return 1
+
+    if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        jq \
+            --arg command_path "$CLAUDE_STATUSLINE_FILE" \
+            '
+            .statusLine = {
+                "type": "command",
+                "command": $command_path,
+                "padding": 0
+            }
+            ' "$CLAUDE_SETTINGS_FILE" > "$tmp_file" || {
+            rm -f "$tmp_file"
+            echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+            return 1
+        }
+    else
+        jq -n \
+            --arg command_path "$CLAUDE_STATUSLINE_FILE" \
+            '{
+                statusLine: {
+                    type: "command",
+                    command: $command_path,
+                    padding: 0
+                }
+            }' > "$tmp_file" || {
+            rm -f "$tmp_file"
+            echo "error: Failed to create $CLAUDE_SETTINGS_FILE" >&2
+            return 1
+        }
+    fi
+
+    mv "$tmp_file" "$CLAUDE_SETTINGS_FILE"
+    chmod 600 "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
+}
+
+_clear_statusline_in_settings() {
+    _require_jq || return 1
+    _validate_settings_file || return 1
+
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        return 0
+    fi
+
+    local tmp_file
+    tmp_file=$(mktemp "${TMPDIR:-/tmp}/ccenv-statusline.XXXXXX") || return 1
+
+    if ! jq 'del(.statusLine)' "$CLAUDE_SETTINGS_FILE" > "$tmp_file"; then
+        rm -f "$tmp_file"
+        echo "error: Failed to update $CLAUDE_SETTINGS_FILE" >&2
+        return 1
+    fi
+
+    mv "$tmp_file" "$CLAUDE_SETTINGS_FILE"
+    chmod 600 "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
+}
+
+_install_statusline_script() {
+    local source_script="$CLAUDE_ENV_SWITCH_PLUGIN_DIR/statusline.sh"
+
+    if [[ ! -f "$source_script" ]]; then
+        echo "error: Statusline source script not found at $source_script" >&2
+        return 1
+    fi
+
+    _ensure_claude_settings_dir
+
+    cp "$source_script" "$CLAUDE_STATUSLINE_FILE" || {
+        echo "error: Failed to copy statusline script to $CLAUDE_STATUSLINE_FILE" >&2
+        return 1
+    }
+
+    chmod 755 "$CLAUDE_STATUSLINE_FILE" 2>/dev/null || true
 }
 
 # List managed auth keys currently present in ~/.claude/settings.json
@@ -701,6 +796,131 @@ _ccenv_settings() {
     esac
 }
 
+# Manage Claude Code status line command in ~/.claude
+_ccenv_statusline_help() {
+    cat <<'EOF'
+Manage Claude Code status line command in ~/.claude
+
+USAGE:
+    ccenv statusline
+    ccenv statusline status
+    ccenv statusline install
+    ccenv statusline clear
+    ccenv statusline uninstall
+
+COMMANDS:
+    status        Show current statusline script and settings.json statusLine config
+    install       Copy statusline.sh to ~/.claude/statusline-command.sh and configure settings.json
+    clear         Remove statusLine from settings.json and delete ~/.claude/statusline-command.sh
+    uninstall     Alias for clear
+    help          Show this help message
+EOF
+}
+
+_ccenv_statusline_status() {
+    echo "Settings file: $CLAUDE_SETTINGS_FILE"
+    echo "Statusline file: $CLAUDE_STATUSLINE_FILE"
+
+    if [[ -f "$CLAUDE_STATUSLINE_FILE" ]]; then
+        echo "Script: installed"
+    else
+        echo "Script: not installed"
+    fi
+
+    if [[ ! -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        echo "Settings: not found"
+        return 0
+    fi
+
+    _validate_settings_file || return 1
+
+    local type=""
+    local command=""
+    local padding=""
+    type=$(_get_statusline_settings_value "type") || return 1
+    command=$(_get_statusline_settings_value "command") || return 1
+    padding=$(_get_statusline_settings_value "padding") || return 1
+
+    if [[ -z "$type" && -z "$command" && -z "$padding" ]]; then
+        echo "Settings: statusLine not configured"
+        return 0
+    fi
+
+    echo "Settings: statusLine configured"
+    [[ -n "$type" ]] && echo "type: $type"
+    [[ -n "$command" ]] && echo "command: $command"
+    [[ -n "$padding" ]] && echo "padding: $padding"
+}
+
+_ccenv_statusline_install() {
+    _install_statusline_script || return 1
+    _set_statusline_in_settings || return 1
+
+    echo "Installed statusline script to $CLAUDE_STATUSLINE_FILE"
+    echo "Configured statusLine in $CLAUDE_SETTINGS_FILE"
+}
+
+_ccenv_statusline_clear() {
+    local removed_file=0
+    local cleared_settings=0
+
+    if [[ -f "$CLAUDE_SETTINGS_FILE" ]]; then
+        local type=""
+        local command=""
+        type=$(_get_statusline_settings_value "type") || return 1
+        command=$(_get_statusline_settings_value "command") || return 1
+        if [[ -n "$type" || -n "$command" ]]; then
+            _clear_statusline_in_settings || return 1
+            cleared_settings=1
+        fi
+    fi
+
+    if [[ -f "$CLAUDE_STATUSLINE_FILE" ]]; then
+        rm -f "$CLAUDE_STATUSLINE_FILE" || {
+            echo "error: Failed to remove $CLAUDE_STATUSLINE_FILE" >&2
+            return 1
+        }
+        removed_file=1
+    fi
+
+    if (( cleared_settings )); then
+        echo "Cleared statusLine from $CLAUDE_SETTINGS_FILE"
+    else
+        echo "No statusLine config found in $CLAUDE_SETTINGS_FILE"
+    fi
+
+    if (( removed_file )); then
+        echo "Removed $CLAUDE_STATUSLINE_FILE"
+    else
+        echo "No statusline file found at $CLAUDE_STATUSLINE_FILE"
+    fi
+}
+
+_ccenv_statusline() {
+    local subcommand="$1"
+    shift 2>/dev/null || true
+
+    case "$subcommand" in
+        ""|status|view|show)
+            _ccenv_statusline_status
+            ;;
+        install|setup)
+            _ccenv_statusline_install
+            ;;
+        clear|remove|rm|uninstall)
+            _ccenv_statusline_clear
+            ;;
+        help|--help|-h)
+            _ccenv_statusline_help
+            ;;
+        *)
+            echo "error: Unknown statusline subcommand '$subcommand'" >&2
+            echo "Run 'ccenv statusline help' for usage information" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Use a configuration (set env vars and start claude)
 # Usage: _ccenv_use <config_name> [extra args for claude...]
 _ccenv_use() {
@@ -972,6 +1192,7 @@ COMMANDS:
                      Use -- to pass extra args: ccenv use <name> -- <args>
     list             List all configurations (alias: ls)
     settings         Manage auth env in ~/.claude/settings.json
+    statusline       Install/manage Claude Code status line command
     view <name>      Display configuration details (alias: info)
     edit <name>      Edit existing configuration
     delete <name>    Delete a configuration (aliases: del, rm)
@@ -989,6 +1210,8 @@ EXAMPLES:
     ccenv settings view          # Show managed auth env in settings.json
     ccenv settings clear         # Clear managed auth env in settings.json
     ccenv settings set work      # Write config 'work' into settings.json env
+    ccenv statusline install     # Install ~/.claude/statusline-command.sh and configure settings.json
+    ccenv statusline status      # Show current statusline installation state
     ccenv use work               # Use the 'work' configuration
     ccenv use work -- --verbose  # Use 'work' config, pass --verbose to claude
     ccenv list                   # List all configurations
@@ -1389,6 +1612,9 @@ ccenv() {
         settings)
             _ccenv_settings "$@"
             ;;
+        statusline)
+            _ccenv_statusline "$@"
+            ;;
         view|info)
             _ccenv_view "$@"
             ;;
@@ -1428,6 +1654,7 @@ _ccenv_completion() {
         'list:List all configurations'
         'ls:List all configurations'
         'settings:Manage auth env in ~/.claude/settings.json'
+        'statusline:Install/manage Claude Code status line command'
         'view:Display configuration details'
         'info:Display configuration details'
         'edit:Edit existing configuration'
@@ -1455,6 +1682,22 @@ _ccenv_completion() {
                     'help:Show settings help'
                 )
                 _describe 'settings-command' settings_subcommands
+                ;;
+            statusline)
+                local -a statusline_subcommands
+                statusline_subcommands=(
+                    'status:Show current statusline installation state'
+                    'view:Show current statusline installation state'
+                    'show:Show current statusline installation state'
+                    'install:Install statusline script and configure settings.json'
+                    'setup:Install statusline script and configure settings.json'
+                    'clear:Remove statusline config and installed script'
+                    'remove:Remove statusline config and installed script'
+                    'rm:Remove statusline config and installed script'
+                    'uninstall:Remove statusline config and installed script'
+                    'help:Show statusline help'
+                )
+                _describe 'statusline-command' statusline_subcommands
                 ;;
             use|view|info|edit|delete|del|rm)
                 local configs=($(_list_configs))

@@ -169,6 +169,18 @@ ccenv settings set work
 
 `ccenv settings set <name>` will clear any existing managed auth env first, then write the selected config into `~/.claude/settings.json`, including `CLAUDE_ENV_CONFIG=<name>` so the status line can show the active env even when Claude is started from settings.
 
+### Manage Claude Code Status Line
+
+Install, inspect, or remove the Claude Code status line command:
+
+```bash
+ccenv statusline install
+ccenv statusline status
+ccenv statusline clear
+```
+
+`ccenv statusline install` copies the repo's `statusline.sh` to `~/.claude/statusline-command.sh` and configures `.claude/settings.json` with a `statusLine` command entry.
+
 ## Configuration Types
 
 The plugin supports three authentication methods:
@@ -236,16 +248,28 @@ Claude 3.5 Sonnet  Ctx: 45%  my-project
 
 ### Setup
 
-Add the following to your `.claude/settings.json`:
+Quick setup:
+
+```bash
+ccenv statusline install
+```
+
+This copies `statusline.sh` to `~/.claude/statusline-command.sh` and writes:
 
 ```json
 {
   "statusLine": {
     "type": "command",
-    "command": "~/.oh-my-zsh/custom/plugins/claude-code-env-switch/statusline.sh",
+    "command": "~/.claude/statusline-command.sh",
     "padding": 0
   }
 }
+```
+
+You can inspect the current install state with:
+
+```bash
+ccenv statusline status
 ```
 
 > **Note:** The script requires `jq` to parse the JSON input from Claude Code. Make sure `jq` is installed (`brew install jq` on macOS).
@@ -276,6 +300,9 @@ ccenv list
 
 # Write one config into ~/.claude/settings.json env
 ccenv settings set personal
+
+# Install the status line command into ~/.claude and wire settings.json
+ccenv statusline install
 
 # Clear managed auth env from ~/.claude/settings.json before using ccenv directly
 ccenv settings clear
