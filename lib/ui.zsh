@@ -51,11 +51,6 @@ _ccenv_select() {
         [[ ${#claude_args[@]} -gt 0 ]] && has_args=1
 
         local shortcuts_line="(↑/↓:move  Enter:start  a:add  e:edit  d:delete  v:view  o:reorder  w:settings  s:args  q:quit)"
-        local term_width
-        term_width=$(tput cols)
-        local shortcuts_len=${#shortcuts_line}
-        local shortcuts_rows=$(( (shortcuts_len + term_width - 1) / term_width ))
-        local list_start_row=$((5 + shortcuts_rows + has_args))
 
         _ccenv_restore() {
             _ccenv_restore_terminal
@@ -76,8 +71,9 @@ _ccenv_select() {
                     echo "Args: ${claude_args[*]}"
                 fi
                 echo
+                tput sc
             else
-                tput cup $list_start_row 0
+                tput rc
             fi
 
             local i=0
@@ -240,8 +236,9 @@ _ccenv_reorder() {
             echo "Reorder configurations:"
             echo "(↑/↓ move cursor, u/d move item up/down, Enter save, q cancel)"
             echo
+            tput sc
         else
-            tput cup 3 0
+            tput rc
         fi
 
         local i=0
