@@ -71,7 +71,7 @@ ccenv use work
 ```
 
 > If `~/.claude/settings.json` already contains any of these managed auth env vars, `ccenv use` will refuse to start Claude until you clear them:
-> `CLAUDE_ENV_CONFIG`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_ATTRIBUTION_HEADER`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+> `CLAUDE_ENV_CONFIG`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `DISABLE_TELEMETRY`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
 >
 > Clear them with:
 >
@@ -192,7 +192,7 @@ Uses two environment variables:
 - `ANTHROPIC_AUTH_TOKEN` — Your authentication token
 
 And automatically sets:
-- `CLAUDE_CODE_ATTRIBUTION_HEADER=0`
+- `DISABLE_TELEMETRY=1`
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
 ### api-key
@@ -202,7 +202,7 @@ Uses two environment variables:
 - `ANTHROPIC_API_KEY` — Your API key
 
 And automatically sets:
-- `CLAUDE_CODE_ATTRIBUTION_HEADER=0`
+- `DISABLE_TELEMETRY=1`
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
 ### oauth
@@ -210,7 +210,9 @@ And automatically sets:
 Uses one environment variable:
 - `CLAUDE_CODE_OAUTH_TOKEN` — Your OAuth token (obtain via `claude setup-token`)
 
-OAuth mode does not set the two Claude Code traffic-control env vars above.
+And automatically sets:
+- `DISABLE_TELEMETRY=1`
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
 ## Configuration Storage
 

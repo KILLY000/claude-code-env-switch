@@ -402,19 +402,21 @@ _ccenv_use() {
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL="$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")" \
         ANTHROPIC_AUTH_TOKEN="$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")" \
-        CLAUDE_CODE_ATTRIBUTION_HEADER="$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+        DISABLE_TELEMETRY="$DISABLE_TELEMETRY_DEFAULT" \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
         claude "$@"
     elif [[ "$token_type" == "api-key" ]]; then
         CLAUDE_ENV_CONFIG="$config_name" \
         ANTHROPIC_BASE_URL="$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")" \
         ANTHROPIC_API_KEY="$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")" \
-        CLAUDE_CODE_ATTRIBUTION_HEADER="$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+        DISABLE_TELEMETRY="$DISABLE_TELEMETRY_DEFAULT" \
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
         claude "$@"
     else
         CLAUDE_ENV_CONFIG="$config_name" \
         CLAUDE_CODE_OAUTH_TOKEN="$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")" \
+        DISABLE_TELEMETRY="$DISABLE_TELEMETRY_DEFAULT" \
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
         claude "$@"
     fi
 }
@@ -470,15 +472,17 @@ _ccenv_view() {
     if [[ "$token_type" == "auth-token" ]]; then
         echo "ANTHROPIC_BASE_URL:    $(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")"
         echo "ANTHROPIC_AUTH_TOKEN:  $(_mask_token "$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")")"
-        echo "CLAUDE_CODE_ATTRIBUTION_HEADER: $CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT"
+        echo "DISABLE_TELEMETRY: $DISABLE_TELEMETRY_DEFAULT"
         echo "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT"
     elif [[ "$token_type" == "api-key" ]]; then
         echo "ANTHROPIC_BASE_URL: $(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")"
         echo "ANTHROPIC_API_KEY:  $(_mask_token "$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")")"
-        echo "CLAUDE_CODE_ATTRIBUTION_HEADER: $CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT"
+        echo "DISABLE_TELEMETRY: $DISABLE_TELEMETRY_DEFAULT"
         echo "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT"
     else
         echo "CLAUDE_CODE_OAUTH_TOKEN: $(_mask_token "$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")")"
+        echo "DISABLE_TELEMETRY: $DISABLE_TELEMETRY_DEFAULT"
+        echo "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT"
     fi
 }
 

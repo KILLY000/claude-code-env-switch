@@ -59,7 +59,7 @@ _mask_env_value() {
 
     if [[ -z "$value" ]]; then
         echo "(not set)"
-    elif [[ "$key" == "CLAUDE_ENV_CONFIG" || "$key" == "ANTHROPIC_BASE_URL" || "$key" == "CLAUDE_CODE_ATTRIBUTION_HEADER" || "$key" == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]]; then
+    elif [[ "$key" == "CLAUDE_ENV_CONFIG" || "$key" == "ANTHROPIC_BASE_URL" || "$key" == "DISABLE_TELEMETRY" || "$key" == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" ]]; then
         echo "$value"
     else
         _mask_token "$value"
@@ -77,13 +77,13 @@ _build_config_env_json() {
                 --arg config_name "$config_name" \
                 --arg base_url "$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")" \
                 --arg auth_token "$(_get_config_value "$conf_file" "ANTHROPIC_AUTH_TOKEN")" \
-                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_telemetry "$DISABLE_TELEMETRY_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '{
                     CLAUDE_ENV_CONFIG: $config_name,
                     ANTHROPIC_BASE_URL: $base_url,
                     ANTHROPIC_AUTH_TOKEN: $auth_token,
-                    CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
+                    DISABLE_TELEMETRY: $disable_telemetry,
                     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $disable_nonessential_traffic
                 }'
             ;;
@@ -92,13 +92,13 @@ _build_config_env_json() {
                 --arg config_name "$config_name" \
                 --arg base_url "$(_get_config_value "$conf_file" "ANTHROPIC_BASE_URL")" \
                 --arg api_key "$(_get_config_value "$conf_file" "ANTHROPIC_API_KEY")" \
-                --arg attribution_header "$CLAUDE_CODE_ATTRIBUTION_HEADER_DEFAULT" \
+                --arg disable_telemetry "$DISABLE_TELEMETRY_DEFAULT" \
                 --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '{
                     CLAUDE_ENV_CONFIG: $config_name,
                     ANTHROPIC_BASE_URL: $base_url,
                     ANTHROPIC_API_KEY: $api_key,
-                    CLAUDE_CODE_ATTRIBUTION_HEADER: $attribution_header,
+                    DISABLE_TELEMETRY: $disable_telemetry,
                     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $disable_nonessential_traffic
                 }'
             ;;
@@ -106,9 +106,13 @@ _build_config_env_json() {
             jq -n \
                 --arg config_name "$config_name" \
                 --arg oauth_token "$(_get_config_value "$conf_file" "CLAUDE_CODE_OAUTH_TOKEN")" \
+                --arg disable_telemetry "$DISABLE_TELEMETRY_DEFAULT" \
+                --arg disable_nonessential_traffic "$CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC_DEFAULT" \
                 '{
                     CLAUDE_ENV_CONFIG: $config_name,
-                    CLAUDE_CODE_OAUTH_TOKEN: $oauth_token
+                    CLAUDE_CODE_OAUTH_TOKEN: $oauth_token,
+                    DISABLE_TELEMETRY: $disable_telemetry,
+                    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: $disable_nonessential_traffic
                 }'
             ;;
         *)
